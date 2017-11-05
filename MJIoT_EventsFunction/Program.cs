@@ -26,7 +26,7 @@ namespace MJIoT_EventsFunction
         {
             using (var context = new MJIoTDBContext())
             {
-                var deviceType = context.Devices
+                var deviceType = context.Devices.Include("DeviceType")
                     .Where(n => n.Id == message.DeviceId)
                     .Select(n => n.DeviceType)
                     .FirstOrDefault();
@@ -44,17 +44,17 @@ namespace MJIoT_EventsFunction
                     throw new NullReferenceException("Property type (" + message.PropertyName + ") does not exist. Procedure aborted.");
                 }
 
-                var property = context.DeviceProperties
+                var prop = context.DeviceProperties
                     .Include("PropertyType").Include("Device")
                     .Where(n => n.Device.Id == message.DeviceId && n.PropertyType.Id == propertyType.Id)
                     .FirstOrDefault();
 
-                if (property == null)
+                if (prop == null)
                 {
                     throw new NullReferenceException("Property (" + message.PropertyName + ") of device (" + message.DeviceId + ") does not exist. Procedure aborted.");
                 }
 
-                property.Value = message.Value;
+                prop.Value = message.Value;
 
                 context.SaveChanges();
             }
