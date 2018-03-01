@@ -28,20 +28,7 @@ namespace MJIoT_EventsFunction
             var message = new DeviceToCloudMessage(newMessage);
             var handler = new EventHandler(message);
             handler.HandleMessage().Wait();
-            
-
-            //Log = log;  //now Log is globally available
-            //log.Info($"C# Event Hub trigger function processed a message: {myEventHubMessage}");
-
-            //// var message = DeviceEventsHandler.DeserializeMessage(myEventHubMessage);
-
-            //var message = JsonConvert.DeserializeObject<DeviceToCloudMessage>(myEventHubMessage as string);
-            //var isSenderProperty = DeviceEventsHandler.SaveValue(message);
-
-            //log.Info(isSenderProperty.ToString());
-
-            //if (isSenderProperty)
-            //    DeviceEventsHandler.SendMessageToListener(message);
+           
         }
     }
 
@@ -80,11 +67,49 @@ namespace MJIoT_EventsFunction
         private async Task NotifyListener(int listenerId)
         {
             var deviceType = ModelDb.GetDeviceType(listenerId);
+
+            if (await ShouldMessageBeSent(deviceType, listenerId))
+            {
+                var message = GetMessageToSend(listenerId.ToString(), deviceType);
+                await IoTHubService.SendToListenerAsync(message);
+            }
+        }
+
+        private async Task<bool> ShouldMessageBeSent(DeviceType deviceType, int listenerId)
+        {
+            //OFFLINE MESSAGING ENABLED?
+            if (!ModelDb.IsOfflineMessagingEnabled(deviceType))
+            {
+                //IS DEVICE ONLINE?
+                if (!(await IoTHubService.IsDeviceOnline(listenerId.ToString())))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private IoTHubMessage GetMessageToSend(string deviceId, DeviceType deviceType)
+        {
             var listenerPropertyType = ModelDb.GetListenerPropertyType(deviceType);
             var format = listenerPropertyType.Format;
-            var convertedValue = MessageConverter.Convert(Message.Value, format);
-            await IoTHubService.SendToListenerAsync(listenerId, listenerPropertyType.Name, convertedValue);
+            var convertedValue =  MessageConverter.Convert(Message.Value, format);
+
+            return new IoTHubMessage(deviceId, listenerPropertyType.Name, convertedValue);
         }
+    }
+
+    public class IoTHubMessage
+    {
+        public IoTHubMessage(string receiverId, string propertyName,  string value)
+        {
+            ReceiverId = receiverId;
+            PropertyName = propertyName;
+            Value = value;
+        }
+
+        public string ReceiverId { get; set; }
+        public string PropertyName { get; set; }
+        public string Value { get; set; }
     }
 
 
@@ -143,6 +168,11 @@ namespace MJIoT_EventsFunction
             }
 
             throw new Exception("GetListenerPropertyType didn't find the Property Type!!");
+        }
+
+        public bool IsOfflineMessagingEnabled(DeviceType deviceType)
+        {
+            return deviceType.OfflineMessagesEnabled;
         }
 
         private DeviceProperty GetDeviceProperty(DeviceToCloudMessage message)
@@ -217,10 +247,26 @@ namespace MJIoT_EventsFunction
             ServiceClient = Microsoft.Azure.Devices.ServiceClient.CreateFromConnectionString(ConnectionString);
         }
 
-        public async Task SendToListenerAsync(int listenerId, string property, string value)
+        public async Task SendToListenerAsync(IoTHubMessage message)
         {
-            var message = GenerateC2DMessage(property, value);
-            await SendC2DMessageAsync(listenerId.ToString(), message);
+            var messageString = GenerateC2DMessage(message.PropertyName, message.Value);
+            await SendC2DMessageAsync(message.ReceiverId, messageString);
+        }
+
+        public async Task<Boolean> IsDeviceOnline(string deviceId)
+        {
+            var methodInvocation = new CloudToDeviceMethod("conn") { ResponseTimeout = TimeSpan.FromSeconds(5) };
+            CloudToDeviceMethodResult response;
+            try
+            {
+                response = await ServiceClient.InvokeDeviceMethodAsync(deviceId, methodInvocation);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+
+            return true;
         }
 
         private async Task SendC2DMessageAsync(string deviceId, string message)
