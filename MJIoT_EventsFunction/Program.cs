@@ -22,13 +22,12 @@ namespace MJIoT_EventsFunction
 
             string newMessage = @"{DeviceId: ""7"",
                                 PropertyName: ""SimulatedSwitchState"",
-                                Value: ""false""
+                                Value: ""true""
                                 }";
 
             var message = new DeviceToCloudMessage(newMessage);
             var handler = new EventHandler(message);
             handler.HandleMessage().Wait();
-           
         }
     }
 
@@ -57,20 +56,20 @@ namespace MJIoT_EventsFunction
 
         private async Task NotifyListeners()
         {
-            var listeners = ModelDb.GetListeners(Message.DeviceId);
+            var connections = ModelDb.GetConnections(Message.DeviceId);
             var notifyTasks = new List<Task>();
-            foreach (var listener in listeners)
-                notifyTasks.Add(NotifyListener(listener.Id));
+            foreach (var connection in connections)
+                notifyTasks.Add(NotifyListener(connection));
             await Task.WhenAll(notifyTasks);
         }
 
-        private async Task NotifyListener(int listenerId)
+        private async Task NotifyListener(Connection connection)
         {
-            var deviceType = ModelDb.GetDeviceType(listenerId);
+            var deviceType = connection.ListenerDevice.DeviceType;
 
-            if (await ShouldMessageBeSent(deviceType, listenerId))
+            if (await ShouldMessageBeSent(deviceType, connection.ListenerDevice.Id))
             {
-                var message = GetMessageToSend(listenerId.ToString(), deviceType);
+                var message = GetMessageToSend(connection.ListenerDevice.Id.ToString(), connection.ListenerProperty);
                 await IoTHubService.SendToListenerAsync(message);
             }
         }
@@ -88,13 +87,12 @@ namespace MJIoT_EventsFunction
             return true;
         }
 
-        private IoTHubMessage GetMessageToSend(string deviceId, DeviceType deviceType)
+        private IoTHubMessage GetMessageToSend(string listenerId, PropertyType listenerPropertyType)
         {
-            var listenerPropertyType = ModelDb.GetListenerPropertyType(deviceType);
             var format = listenerPropertyType.Format;
             var convertedValue =  MessageConverter.Convert(Message.Value, format);
 
-            return new IoTHubMessage(deviceId, listenerPropertyType.Name, convertedValue);
+            return new IoTHubMessage(listenerId, listenerPropertyType.Name, convertedValue);
         }
     }
 
@@ -129,46 +127,77 @@ namespace MJIoT_EventsFunction
             Context.SaveChanges();
         }
 
-        public List<MJIoT_DBModel.Device> GetListeners(int senderId)
+        public List<MJIoT_DBModel.Connection> GetConnections(int senderId)
         {
-            var listeners = Context.Devices.Include("ListenerDevices")
-                    .Where(n => n.Id == senderId)
-                    .Select(n => n.ListenerDevices)
-                    .FirstOrDefault();
+            //var listeners = Context.Devices.Include("ListenerDevices")
+            //        .Where(n => n.Id == senderId)
+            //        .Select(n => n.ListenerDevices)
+            //        .FirstOrDefault();
 
-            return listeners.ToList();
+            var connections = Context.Connections
+                    .Include(n => n.ListenerDevice.DeviceType)
+                    .Include(n => n.SenderDevice)
+                    .Include(n => n.SenderProperty)
+                    .Include(n => n.ListenerProperty)
+                .Where(n => n.SenderDevice.Id == senderId)
+                .ToList();
+
+            return connections;
         }
 
         public bool IsItSenderProperty(int deviceId, string property)
         {
-            var deviceType = GetDeviceType(deviceId);
-            if (deviceType.SenderProperty == null)
-                return false;
+            //var deviceType = GetDeviceType(deviceId);
+            //if (deviceType.SenderProperty == null)
+            //    return false;
+            //else
+            //    return deviceType.SenderProperty.Name == property;
+
+            if (GetPropertyType(deviceId, property).IsSenderProperty)
+                return true;
             else
-                return deviceType.SenderProperty.Name == property;
+                return false;
+
         }
 
-        public PropertyType GetListenerPropertyType(DeviceType deviceType) //NEEDS TO BE TESTED
+        public PropertyType GetPropertyType(int deviceId, string property)
         {
-            var i = 0;
-            while (true && i <= 100)  //DANGEROUS - MIGHT BE INIFNITE (for now <= 100 is a workaround)
+            var deviceType = GetDeviceType(deviceId);
+
+            var propertyType = Context.PropertyTypes
+                .Where(n => n.DeviceType.Id == deviceType.Id && n.Name == property)
+                .ToList()
+                .FirstOrDefault();
+
+            if (propertyType == null)
             {
-                i++;
-                var property = deviceType.ListenerProperty;
-
-                if (property != null)
-                    return property;
-                else
-                {
-                    var baseType = deviceType.BaseDeviceType;
-
-                    if (baseType != null)
-                        deviceType = baseType;
-                }
+                throw new Exception("GetPropertyType didn't find the Property Type!!");
             }
 
-            throw new Exception("GetListenerPropertyType didn't find the Property Type!!");
+            return propertyType;
         }
+
+        //public PropertyType GetListenerPropertyType(DeviceType deviceType) //NEEDS TO BE TESTED
+        //{
+        //    var i = 0;
+        //    while (true && i <= 100)  //DANGEROUS - MIGHT BE INIFNITE (for now <= 100 is a workaround)
+        //    {
+        //        i++;
+        //        var property = deviceType.ListenerProperty;
+
+        //        if (property != null)
+        //            return property;
+        //        else
+        //        {
+        //            var baseType = deviceType.BaseDeviceType;
+
+        //            if (baseType != null)
+        //                deviceType = baseType;
+        //        }
+        //    }
+
+        //    throw new Exception("GetListenerPropertyType didn't find the Property Type!!");
+        //}
 
         public bool IsOfflineMessagingEnabled(DeviceType deviceType)
         {
@@ -223,7 +252,7 @@ namespace MJIoT_EventsFunction
             //lambda in Include() requires using System.Data.Entity;
             var deviceType = Context.Devices.Include(n => n.DeviceType)
                    .Where(n => n.Id == deviceId)
-                   .Select(n => n.DeviceType).Include(n => n.ListenerProperty).Include(n => n.SenderProperty)
+                   .Select(n => n.DeviceType)
                    .FirstOrDefault();
 
             if (deviceType == null)
