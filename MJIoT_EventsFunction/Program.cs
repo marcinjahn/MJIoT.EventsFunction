@@ -47,7 +47,7 @@ namespace MJIoT_EventsFunction
 
         public async Task HandleMessage()
         {
-            ModelDb.SaveValue(Message);
+            //ModelDb.SaveValue(Message);
 
             var isSenderProperty = ModelDb.IsItSenderProperty(Message.DeviceId, Message.PropertyName);
             if (isSenderProperty)
