@@ -22,10 +22,10 @@ namespace MJIoT_EventsFunction
 
             string newMessage = @"{DeviceId: ""7"",
                                 PropertyName: ""SimulatedSwitchState"",
-                                Value: ""true""
+                                PropertyValue: ""true""
                                 }";
 
-            var message = new DeviceToCloudMessage(newMessage);
+            var message = new PropertyDataMessage(newMessage);
             var handler = new EventHandler(message);
             handler.HandleMessage().Wait();
         }
@@ -35,9 +35,9 @@ namespace MJIoT_EventsFunction
     {
         private IoTHubService IoTHubService { get; set; }
         private MJIoTDb ModelDb { get; set; }
-        private DeviceToCloudMessage Message { get; set; }
+        private PropertyDataMessage Message { get; set; }
 
-        public EventHandler(DeviceToCloudMessage message)
+        public EventHandler(PropertyDataMessage message)
         {
             IoTHubService = new IoTHubService();
             ModelDb = new MJIoTDb();
@@ -90,7 +90,7 @@ namespace MJIoT_EventsFunction
         private IoTHubMessage GetMessageToSend(string listenerId, PropertyType listenerPropertyType)
         {
             var format = listenerPropertyType.Format;
-            var convertedValue =  MessageConverter.Convert(Message.Value, format);
+            var convertedValue =  MessageConverter.Convert(Message.PropertyValue, format);
 
             return new IoTHubMessage(listenerId, listenerPropertyType.Name, convertedValue);
         }
@@ -102,12 +102,12 @@ namespace MJIoT_EventsFunction
         {
             ReceiverId = receiverId;
             PropertyName = propertyName;
-            Value = value;
+            PropertyValue = value;
         }
 
         public string ReceiverId { get; set; }
         public string PropertyName { get; set; }
-        public string Value { get; set; }
+        public string PropertyValue { get; set; }
     }
 
 
@@ -120,10 +120,10 @@ namespace MJIoT_EventsFunction
             Context = new MJIoTDBContext();
         }
 
-        public void SaveValue(DeviceToCloudMessage message)
+        public void SaveValue(PropertyDataMessage message)
         {
             DeviceProperty deviceProperty = GetDeviceProperty(message);
-            deviceProperty.Value = message.Value;
+            deviceProperty.PropertyValue = message.PropertyValue;
             Context.SaveChanges();
         }
 
@@ -204,7 +204,7 @@ namespace MJIoT_EventsFunction
             return deviceType.OfflineMessagesEnabled;
         }
 
-        private DeviceProperty GetDeviceProperty(DeviceToCloudMessage message)
+        private DeviceProperty GetDeviceProperty(PropertyDataMessage message)
         {
             DeviceType deviceType = GetDeviceType(message.DeviceId);
             PropertyType propertyType = GetPropertyType(message.PropertyName, deviceType.Id);
@@ -278,7 +278,7 @@ namespace MJIoT_EventsFunction
 
         public async Task SendToListenerAsync(IoTHubMessage message)
         {
-            var messageString = GenerateC2DMessage(message.PropertyName, message.Value);
+            var messageString = GenerateC2DMessage(message.PropertyName, message.PropertyValue);
             await SendC2DMessageAsync(message.ReceiverId, messageString);
         }
 
@@ -306,37 +306,37 @@ namespace MJIoT_EventsFunction
 
         private string GenerateC2DMessage(string property, string value)
         {
-            return @"{""PropertyName"":""" + property + @""",""Value"":""" + value + @"""}";
+            return @"{""PropertyName"":""" + property + @""",""PropertyValue"":""" + value + @"""}";
         }
 
     }
 
-    public class DeviceToCloudMessage
+    public class PropertyDataMessage
     {
-        public DeviceToCloudMessage()
+        public PropertyDataMessage()
         {
 
         }
 
-        public DeviceToCloudMessage(string message)
+        public PropertyDataMessage(string message)
         {
-            var msg = JsonConvert.DeserializeObject<DeviceToCloudMessage>(message as string);
+            var msg = JsonConvert.DeserializeObject<PropertyDataMessage>(message as string);
             DeviceId = msg.DeviceId;
             PropertyName = msg.PropertyName;
-            Value = msg.Value;
+            PropertyValue = msg.PropertyValue;
         }
 
-        public DeviceToCloudMessage(dynamic data)
+        public PropertyDataMessage(dynamic data)
         {
             DeviceId = data.DeviceId;
             PropertyName = data.PropertyName;
-            Value = data.Value;
+            PropertyValue = data.Value;
             //Timestamp = data.Timestamp;
         }
 
         public int DeviceId { get; set; }
         public string PropertyName { get; set; }
-        public string Value { get; set; }
+        public string PropertyValue { get; set; }
         //public string Timestamp { get; set; }
     }
 
