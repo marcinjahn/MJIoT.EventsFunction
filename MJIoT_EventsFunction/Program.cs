@@ -69,7 +69,7 @@ namespace MJIoT_EventsFunction
 
             if (await ShouldMessageBeSent(deviceType, connection.ListenerDevice.Id))
             {
-                var message = GetMessageToSend(connection.ListenerDevice.Id.ToString(), connection.ListenerProperty);
+                var message = GetMessageToSend(connection);
                 await IoTHubService.SendToListenerAsync(message);
             }
         }
@@ -87,12 +87,13 @@ namespace MJIoT_EventsFunction
             return true;
         }
 
-        private IoTHubMessage GetMessageToSend(string listenerId, PropertyType listenerPropertyType)
+        private IoTHubMessage GetMessageToSend(Connection connection)
         {
-            var format = listenerPropertyType.Format;
-            var convertedValue =  MessageConverter.Convert(Message.PropertyValue, format);
-
-            return new IoTHubMessage(listenerId, listenerPropertyType.Name, convertedValue);
+            var senderPropertyType = ModelDb.GetPropertyType(connection.SenderDevice.Id, connection.SenderProperty.Name);
+            var listenerPropertyType = ModelDb.GetPropertyType(connection.ListenerDevice.Id, connection.ListenerProperty.Name);
+            //var convertedValue =  MessageConverter.Convert(Message.PropertyValue, format);
+            var convertedValue = ValueConverter.GetMessageValue(senderPropertyType.Format, listenerPropertyType.Format, Message.PropertyValue, connection);
+            return new IoTHubMessage(connection.ListenerDevice.Id.ToString(), listenerPropertyType.Name, convertedValue);
         }
     }
 
@@ -342,69 +343,250 @@ namespace MJIoT_EventsFunction
 
 
 
-
-    public class MessageConverter
+    public class ValueConverter
     {
-        public static string Convert(string value, PropertyTypeFormats targetType)
+        public static string GetMessageValue(PropertyTypeFormat senderType, PropertyTypeFormat listenerType, string value, Connection connection)
         {
-            var stringValue = value;
-            double floatValue;
-            int intValue;
+            string result;
+            var filter = new Filter();
+            var calculation = new Calculation();
 
-            //ONEBYTE
-            if (targetType == PropertyTypeFormats.OneByte)
+            result = filter.Modify(value, connection.Filter, connection.FilterValue);
+            result = calculation.Modify(result, connection.Calculation, connection.CalculationValue);
+
+            if (senderType == PropertyTypeFormat.Number)
             {
-                if (stringValue == "true")
-                    return "255";
-                else if (stringValue == "false")
-                    return "0";
-                else if (Double.TryParse(stringValue, out floatValue))
+                if (listenerType == PropertyTypeFormat.Number)
                 {
-                    intValue = (int)floatValue > 255 ? 255 : (int)floatValue;
-                    return intValue.ToString();
+                    return result;
                 }
-                else
-                    return "0";
-            }
-
-            //BOOLEAN
-            else if (targetType == PropertyTypeFormats.Boolean)
-            {
-                if (stringValue == "true" || stringValue.ToLower() == "on")
-                    return "true";
-                else if (stringValue == "false" || stringValue.ToLower() == "off")
-                    return "false";
-                else if (Double.TryParse(stringValue, out floatValue))
+                else if (listenerType == PropertyTypeFormat.String)
                 {
-                    if (floatValue > 0)
-                        return "true";
+                    return result;
+                }
+                else if (listenerType == PropertyTypeFormat.Boolean)
+                {
+                    return result;
+                }
+            }
+            else if (senderType == PropertyTypeFormat.String)
+            {
+                if (listenerType == PropertyTypeFormat.Number)
+                {
+                    float number = 0;
+                    if (float.TryParse(value, out number))
+                        return number.ToString();
                     else
-                        return "false";
+                        return null;
                 }
-                else
-                    return "false";
-            }
-
-            //FLOAT
-            else if (targetType == PropertyTypeFormats.Float)
-            {
-                if (stringValue == "true")
-                    return "1";  //?? What value should it be?
-                else if (stringValue == "false")
-                    return "0";
-                else if (Double.TryParse(stringValue, out floatValue))
+                else if (listenerType == PropertyTypeFormat.String)
                 {
-                    return floatValue.ToString();
+                    return result;
                 }
-                else
-                    return "0";
+                else if (listenerType == PropertyTypeFormat.Boolean)
+                {
+                    if (value.ToLower() == "true" || value.ToLower() == "on")
+                        return "true";
+                    else if (value.ToLower() == "false" || value.ToLower() == "off")
+                        return "false";
+                    else
+                        return null;
+                }
+            }
+            else if (senderType == PropertyTypeFormat.Boolean)
+            {
+                if (listenerType == PropertyTypeFormat.Number)
+                {
+                    if (result == "true")
+                        return "1";
+                    else if (result == "false")
+                        return "0";
+                    else
+                        return null;
+                }
+                else if (listenerType == PropertyTypeFormat.String)
+                {
+                    return result;
+                }
+                else if (listenerType == PropertyTypeFormat.Boolean)
+                {
+                    return result;
+                }
             }
 
-            //RAW
-            else
-            {
-                return stringValue;
-            }
+            return null;
         }
     }
+
+    public interface IValueModifier
+    {
+        string Modify(string value, object modifier, string modifierValue);
+    }
+
+    public class Calculation : IValueModifier
+    {
+        public string Modify(string value, object modifier, string modifierValue)
+        {
+            if (value == null || modifier == null) return null;
+
+            ConnectionCalculation? calculationType = modifier as ConnectionCalculation?;
+
+            if (calculationType == ConnectionCalculation.Addition)
+            {
+                return (float.Parse(value) + float.Parse(modifierValue)).ToString();
+            }
+            else if (calculationType == ConnectionCalculation.Subtraction)
+            {
+                return (float.Parse(value) - float.Parse(modifierValue)).ToString();
+            }
+            else if (calculationType == ConnectionCalculation.Product)
+            {
+                return (float.Parse(value) * float.Parse(modifierValue)).ToString();
+            }
+            else if (calculationType == ConnectionCalculation.Division)
+            {
+                if (modifierValue == "0")
+                    return null;
+                return (float.Parse(value) / float.Parse(modifierValue)).ToString();
+            }
+            //else if (calculationType == ConnectionCalculation.)
+            //{
+            //    return (float.Parse(value) - float.Parse(modifierValue)).ToString();
+            //}
+            else if (calculationType == ConnectionCalculation.BooleanAnd)
+            {
+                if (value == "false" || modifierValue == "false")
+                    return "false";
+                else
+                    return "true";
+            }
+            else if (calculationType == ConnectionCalculation.BooleanNot)
+            {
+                return (value == "false") ? "true" : "false";
+            }
+            else if (calculationType == ConnectionCalculation.BooleanOr)
+            {
+                if (value == "true" || modifierValue == "true")
+                    return "true";
+                else
+                    return "false";
+            }
+
+            return value;
+        }
+    }
+
+    public class Filter : IValueModifier
+    {
+        public string Modify(string value, object modifier, string modifierValue)
+        {
+            if (value == null || modifier == null) return null;
+
+            ConnectionFilter? filterType = modifier as ConnectionFilter?;
+
+            if (filterType == ConnectionFilter.Equal)
+            {
+                if (value.Equals(modifierValue))
+                    return value;
+            }
+            else if (filterType == ConnectionFilter.NotEqual)
+            {
+                if (!value.Equals(modifierValue))
+                    return value;
+            }
+            else if (filterType == ConnectionFilter.Greater)
+            {
+                if (float.Parse(value) > float.Parse(modifierValue))
+                    return value;
+            }
+            else if (filterType == ConnectionFilter.GreaterOrEqual)
+            {
+                if (float.Parse(value) >= float.Parse(modifierValue))
+                    return value;
+            }
+            else if (filterType == ConnectionFilter.Less)
+            {
+                if (float.Parse(value) < float.Parse(modifierValue))
+                    return value;
+            }
+            else if (filterType == ConnectionFilter.LessOrEqual)
+            {
+                if (float.Parse(value) <= float.Parse(modifierValue))
+                    return value;
+            }
+            //else if (filterType == ConnectionFilter.None)
+            //{
+            //    return value;
+            //}
+
+            return value;
+        }
+    }
+
+
+
+    //public class MessageConverter
+    //{
+    //    public static string Convert(string value, PropertyTypeFormat targetType)
+    //    {
+    //        var stringValue = value;
+    //        double floatValue;
+    //        //int intValue;
+
+    //        //ONEBYTE
+    //        //if (targetType == PropertyTypeFormats.OneByte)
+    //        //{
+    //        //    if (stringValue == "true")
+    //        //        return "255";
+    //        //    else if (stringValue == "false")
+    //        //        return "0";
+    //        //    else if (Double.TryParse(stringValue, out floatValue))
+    //        //    {
+    //        //        intValue = (int)floatValue > 255 ? 255 : (int)floatValue;
+    //        //        return intValue.ToString();
+    //        //    }
+    //        //    else
+    //        //        return "0";
+    //        //}
+
+    //        //BOOLEAN
+    //        else if (targetType == PropertyTypeFormat.Boolean)
+    //        {
+    //            if (stringValue == "true" || stringValue.ToLower() == "on")
+    //                return "true";
+    //            else if (stringValue == "false" || stringValue.ToLower() == "off")
+    //                return "false";
+    //            else if (Double.TryParse(stringValue, out floatValue))
+    //            {
+    //                if (floatValue > 0)
+    //                    return "true";
+    //                else
+    //                    return "false";
+    //            }
+    //            else
+    //                return "false";
+    //        }
+
+    //        //NUMBER
+    //        else if (targetType == PropertyTypeFormat.Number)
+    //        {
+    //            if (stringValue == "true")
+    //                return "1";  //?? What value should it be?
+    //            else if (stringValue == "false")
+    //                return "0";
+    //            else if (Double.TryParse(stringValue, out floatValue))
+    //            {
+    //                return floatValue.ToString();
+    //            }
+    //            else
+    //                return "0";
+    //        }
+
+    //        //RAW
+    //        else
+    //        {
+    //            return stringValue;
+    //        }
+    //    }
+    //}
 }
