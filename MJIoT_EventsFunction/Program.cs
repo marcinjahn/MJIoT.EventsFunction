@@ -22,7 +22,7 @@ namespace MJIoT_EventsFunction
 
             string newMessage = @"{DeviceId: ""7"",
                                 PropertyName: ""SimulatedSwitchState"",
-                                PropertyValue: ""true""
+                                PropertyValue: ""false""
                                 }";
 
             var message = new PropertyDataMessage(newMessage);
@@ -93,6 +93,8 @@ namespace MJIoT_EventsFunction
             var listenerPropertyType = ModelDb.GetPropertyType(connection.ListenerDevice.Id, connection.ListenerProperty.Name);
             //var convertedValue =  MessageConverter.Convert(Message.PropertyValue, format);
             var convertedValue = ValueConverter.GetMessageValue(senderPropertyType.Format, listenerPropertyType.Format, Message.PropertyValue, connection);
+            if (convertedValue == null)
+                throw new ArgumentNullException("Sending was blocked by a filter.");
             return new IoTHubMessage(connection.ListenerDevice.Id.ToString(), listenerPropertyType.Name, convertedValue);
         }
     }
@@ -345,7 +347,7 @@ namespace MJIoT_EventsFunction
 
     public class ValueConverter
     {
-        public static string GetMessageValue(PropertyTypeFormat senderType, PropertyTypeFormat listenerType, string value, Connection connection)
+        public static string GetMessageValue(PropertyFormat senderType, PropertyFormat listenerType, string value, Connection connection)
         {
             string result;
             var filter = new Filter();
@@ -354,24 +356,27 @@ namespace MJIoT_EventsFunction
             result = filter.Modify(value, connection.Filter, connection.FilterValue);
             result = calculation.Modify(result, connection.Calculation, connection.CalculationValue);
 
-            if (senderType == PropertyTypeFormat.Number)
+            if (result == null)
+                return null;
+
+            if (senderType == PropertyFormat.Number)
             {
-                if (listenerType == PropertyTypeFormat.Number)
+                if (listenerType == PropertyFormat.Number)
                 {
                     return result;
                 }
-                else if (listenerType == PropertyTypeFormat.String)
+                else if (listenerType == PropertyFormat.String)
                 {
                     return result;
                 }
-                else if (listenerType == PropertyTypeFormat.Boolean)
+                else if (listenerType == PropertyFormat.Boolean)
                 {
                     return result;
                 }
             }
-            else if (senderType == PropertyTypeFormat.String)
+            else if (senderType == PropertyFormat.String)
             {
-                if (listenerType == PropertyTypeFormat.Number)
+                if (listenerType == PropertyFormat.Number)
                 {
                     float number = 0;
                     if (float.TryParse(value, out number))
@@ -379,11 +384,11 @@ namespace MJIoT_EventsFunction
                     else
                         return null;
                 }
-                else if (listenerType == PropertyTypeFormat.String)
+                else if (listenerType == PropertyFormat.String)
                 {
                     return result;
                 }
-                else if (listenerType == PropertyTypeFormat.Boolean)
+                else if (listenerType == PropertyFormat.Boolean)
                 {
                     if (value.ToLower() == "true" || value.ToLower() == "on")
                         return "true";
@@ -393,9 +398,9 @@ namespace MJIoT_EventsFunction
                         return null;
                 }
             }
-            else if (senderType == PropertyTypeFormat.Boolean)
+            else if (senderType == PropertyFormat.Boolean)
             {
-                if (listenerType == PropertyTypeFormat.Number)
+                if (listenerType == PropertyFormat.Number)
                 {
                     if (result == "true")
                         return "1";
@@ -404,11 +409,11 @@ namespace MJIoT_EventsFunction
                     else
                         return null;
                 }
-                else if (listenerType == PropertyTypeFormat.String)
+                else if (listenerType == PropertyFormat.String)
                 {
                     return result;
                 }
-                else if (listenerType == PropertyTypeFormat.Boolean)
+                else if (listenerType == PropertyFormat.Boolean)
                 {
                     return result;
                 }
@@ -488,31 +493,43 @@ namespace MJIoT_EventsFunction
             {
                 if (value.Equals(modifierValue))
                     return value;
+                else
+                    return null;
             }
             else if (filterType == ConnectionFilter.NotEqual)
             {
                 if (!value.Equals(modifierValue))
                     return value;
+                else
+                    return null;
             }
             else if (filterType == ConnectionFilter.Greater)
             {
                 if (float.Parse(value) > float.Parse(modifierValue))
                     return value;
+                else
+                    return null;
             }
             else if (filterType == ConnectionFilter.GreaterOrEqual)
             {
                 if (float.Parse(value) >= float.Parse(modifierValue))
                     return value;
+                else
+                    return null;
             }
             else if (filterType == ConnectionFilter.Less)
             {
                 if (float.Parse(value) < float.Parse(modifierValue))
                     return value;
+                else
+                    return null;
             }
             else if (filterType == ConnectionFilter.LessOrEqual)
             {
                 if (float.Parse(value) <= float.Parse(modifierValue))
                     return value;
+                else
+                    return null;
             }
             //else if (filterType == ConnectionFilter.None)
             //{
