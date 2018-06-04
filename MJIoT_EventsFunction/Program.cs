@@ -46,12 +46,34 @@ namespace MJIoT_EventsFunction
 
         public async Task HandleMessage()
         {
-            //ModelDb.SaveValue(Message);
+            if (!IsMessageValid(Message))
+                throw new Exception($"Received value does not match the declared type of sender property! (DeviceId: {Message.DeviceId}, Property: {Message.PropertyName}, Value: {Message.PropertyValue})");
+
 
             var isSenderProperty = ModelDb.IsItSenderProperty(Message.DeviceId, Message.PropertyName);
             if (isSenderProperty)
                 await NotifyListeners();
 
+        }
+
+        public bool IsMessageValid(PropertyDataMessage message)
+        {
+            var propertyFormat = ModelDb.GetPropertyType(message.DeviceId, message.PropertyName).Format;
+
+            if (propertyFormat == PropertyFormat.Boolean)
+            {
+                if (message.PropertyValue == "true" || message.PropertyValue == "false")
+                    return true;
+            }
+            else if (propertyFormat == PropertyFormat.Number)
+            {
+                if (Double.TryParse(message.PropertyValue, out double result))
+                    return true;
+            }
+            else if (propertyFormat == PropertyFormat.String)
+                return true;
+
+            return false;
         }
 
         private async Task NotifyListeners()
@@ -74,10 +96,10 @@ namespace MJIoT_EventsFunction
             }
         }
 
-        private async Task<bool> ShouldMessageBeSent(DeviceType deviceType, int listenerId)
+        private async Task<bool> ShouldMessageBeSent(DeviceType listenerDeviceType, int listenerId)
         {
             //OFFLINE MESSAGING ENABLED?
-            if (!ModelDb.IsOfflineMessagingEnabled(deviceType))
+            if (!ModelDb.IsOfflineMessagingEnabled(listenerDeviceType))
             {
                 //IS DEVICE ONLINE?
                 if (!(await IoTHubService.IsDeviceOnline(listenerId.ToString())))
